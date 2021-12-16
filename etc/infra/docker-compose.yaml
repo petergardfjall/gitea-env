@@ -1,0 +1,105 @@
+version: "3"
+
+networks:
+  gitea_env_net:
+    driver: bridge
+
+volumes:
+  postgres:
+  gitea:
+
+services:
+  # Postgres
+  postgres:
+    container_name: postgres
+    image: postgres:12
+    restart: unless-stopped
+    networks:
+      - gitea_env_net
+    ports:
+      - ${POSTGRES_PORT}:5432
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      # note: all .sql files under this directory will be run on first start of
+      # container. this is a good place to initialize databases needed by other
+      # components.
+      - ./assets/initdb:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - TZ=UTC
+
+  # Gitea git hosting server
+  gitea:
+    container_name: gitea
+    image: gitea/gitea:1.15.7
+    entrypoint:
+      - /bin/sh
+    command:
+      - -c
+      - |
+        # wait for postgres
+        # note: explicitly use docker's internal DNS resolver (127.0.0.11) to
+        # work around https://github.com/gliderlabs/docker-alpine/issues/539
+        # (issue with docker images based on Alpine 3.11)
+        until nslookup postgres 127.0.0.11; do echo waiting for postgres service; sleep 1; done;
+        until nc -z postgres 5432; do echo "awaiting postgres listen port ..."; sleep 1s; done
+
+        #
+        # automate setup to avoid an installation step on first login.
+        # (for details check main_test.go in gitea-sdk)
+        #
+        cat > /tmp/app.ini <<EOF
+        [security]
+        INSTALL_LOCK = true
+        [database]
+        DB_TYPE  = $${DB_TYPE}
+        HOST = $${DB_HOST}
+        NAME = $${DB_NAME}
+        USER = $${DB_USER}
+        PASSWD = $${DB_PASSWD}
+        [log]
+        MODE = console
+        EOF
+        cat /tmp/app.ini
+        # prepare database tables
+        gitea migrate --config /tmp/app.ini
+        # create the admin user account
+        gitea admin user create --config /tmp/app.ini --username ${GITEA_ADMIN_USERNAME} --password ${GITEA_ADMIN_PASSWORD} --email admin@foo.bar --admin=true --must-change-password=false
+        # start gitea server
+        /usr/bin/entrypoint /bin/s6-svscan /etc/s6
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - DB_TYPE=postgres
+      - DB_HOST=postgres:5432
+      - DB_NAME=gitea
+      - DB_USER=postgres
+      - DB_PASSWD=password
+      - HTTP_PORT=8080
+      # disallow access to the install page
+      - INSTALL_LOCK=true
+      # disable registration (after which only admin can create accounts for users)
+      - DISABLE_REGISTRATION=true
+    restart: always
+    networks:
+      - gitea_env_net
+    volumes:
+      - gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      # web UI
+      - "${GITEA_WEB_PORT}:8080"
+      # NOTE: after gitea is up, register a ssh key with the user account
+      # to be able to clone over ssh. It should then be possible to access
+      # gitea over ssh via:
+      #    ssh -i gitea-key -p ${GITEA_SSH_PORT} -o NoHostAuthenticationForLocalhost=true git@localhost
+      # To clone over ssh:
+      #
+      #   export GIT_SSH_COMMAND="ssh -i ${ssh_key} -p ${GITEA_SSH_PORT} -o NoHostAuthenticationForLocalhost=true"
+      #   git clone git@localhost:<gitea-user>/<repo>.git
+      #
+      - "${GITEA_SSH_PORT}:22"
+    depends_on:
+      - postgres
