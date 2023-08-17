@@ -10,6 +10,7 @@
 
 set -e
 
+export GITEA_VERSION=${GITEA_VERSION:-1.17.2}
 # Host port where Gitea will serve its web/API.
 export GITEA_WEB_PORT=${GITEA_WEB_PORT:-8080}
 # Host port where Gitea will serve ssh.
