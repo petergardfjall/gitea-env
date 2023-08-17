@@ -18,6 +18,10 @@ export GITEA_SSH_PORT=${GITEA_SSH_PORT:-2222}
 export GITEA_ADMIN_USERNAME=${GITEA_ADMIN_USERNAME:-gitea}
 export GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-password}
 
+# The HOME directory for the git user. This directory will contain the
+# .gitconfig and possible .gnupg directories that Gitea's git calls will use.
+export GITEA_HOME_PATH=/data/git
+
 # Host port where Postgres will serve.
 export POSTGRES_PORT=${POSTGRES_PORT:-5432}
 

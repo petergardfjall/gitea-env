@@ -65,9 +65,22 @@ services:
         cat /tmp/app.ini
 
         # prepare database tables
-        su git -c "gitea migrate --config /tmp/app.ini"
+        echo "migrating database ..."
+        su git -c "gitea migrate --config /tmp/app.ini"  > /dev/null 2>&1
         # create the admin user account
         su git -c "gitea admin user create --config /tmp/app.ini --username ${GITEA_ADMIN_USERNAME} --password ${GITEA_ADMIN_PASSWORD} --email admin@foo.bar --admin=true --must-change-password=false"
+
+        # Gitea 1.19.3 uses git 2.38+ which changes the checksums of archives
+        # produced via 'git archive'. Instead of using gzip(1) it uses an
+        # internal library that produces a slightly different tar.gz
+        # files. Setting tar.<format>.command like below restores the old
+        # behavior. This is important if checksum-stability for git archives is
+        # relied upon.
+        echo "GITEA_HOME_PATH: ${GITEA_HOME_PATH}"
+        mkdir -p ${GITEA_HOME_PATH}/data/git && touch ${GITEA_HOME_PATH}/.gitconfig && chown -R git:git ${GITEA_HOME_PATH}
+        su git -c "git config --global tar.tgz.command 'gzip -cn'"
+        su git -c "git config --global tar.tar.gz.command 'gzip -cn'"
+
         # start gitea server
         /usr/bin/entrypoint /bin/s6-svscan /etc/s6
     environment:
@@ -83,6 +96,8 @@ services:
       - INSTALL_LOCK=true
       # disable registration (after which only admin can create accounts for users)
       - DISABLE_REGISTRATION=true
+      # Set the [git] HOME_PATH config variable.
+      - GITEA__git__HOME_PATH=${GITEA_HOME_PATH}
     restart: always
     networks:
       - gitea_env_net
